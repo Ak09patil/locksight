@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LockSight</title>
+<!--
+  Light theme on purpose: this page will be shown on a classroom projector,
+  where dark themes wash out. Colours encode meaning only:
+    teal   = a process HOLDS a resource   (allocation edge R -> P)
+    amber  = a process is WAITING         (request edge P -> R, dashed)
+    red    = deadlock
+  Cytoscape.js is served locally from /static/vendor so the demo works
+  without internet.
+-->
+<script src="/static/vendor/cytoscape.min.js"></script>
+<style>
+  :root {
+    --bg: #eef2f5;
+    --panel: #ffffff;
+    --ink: #1c2733;
+    --muted: #5b6b7b;
+    --line: #d5dde5;
+    --hold: #0f766e;
+    --wait: #d97706;
+    --dead: #dc2626;
+    --resource: #1e3a5f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg); color: var(--ink);
+    display: grid; grid-template-rows: auto 1fr; font-size: 15px;
+  }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+    padding: 14px 20px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 22px; margin: 0 12px 0 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 15px; margin-left: 8px; }
+  label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 3px; }
+  select, input[type=range] { font: inherit; font-size: 14px; }
+  select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  button {
+    font: inherit; font-weight: 600; padding: 9px 18px; border: 0; border-radius: 6px;
+    background: var(--resource); color: #fff; cursor: pointer; margin-left: auto;
+  }
+  button:disabled { background: #94a3b8; cursor: default; }
+  :focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+
+  main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+  #stage { position: relative; min-height: 0; }
+  #cy { position: absolute; inset: 0; }
+
+  #banner {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: var(--dead); color: #fff; padding: 12px 22px; border-radius: 8px;
+    font-size: 17px; font-weight: 600; display: none; max-width: 90%; text-align: center;
+    box-shadow: 0 6px 20px rgba(220, 38, 38, 0.35);
+  }
+  #banner small { display: block; font-weight: 400; font-size: 14px; opacity: 0.9; margin-top: 2px; }
+
+  #legend {
+    position: absolute; left: 16px; top: 16px; background: rgba(255,255,255,0.92);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px;
+    font-size: 13px; display: grid; gap: 5px;
+  }
+  .key { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 26px; height: 0; border-top: 3px solid; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+
+  #empty {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--muted); font-size: 16px; text-align: center; padding: 20px;
+  }
+
+  aside {
+    background: var(--panel); border-left: 1px solid var(--line);
+    display: grid; grid-template-rows: auto auto 1fr; min-height: 0;
+  }
+  #counters { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+  .counter { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .counter:nth-child(odd) { border-right: 1px solid var(--line); }
+  .counter b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .counter span { font-size: 13px; color: var(--muted); }
+  #c-aborts b { color: var(--dead); }
+  #c-waiting b { color: var(--wait); }
+
+  #result { padding: 14px 18px; border-bottom: 1px solid var(--line); display: none; font-size: 13px; }
+  #result h2 { font-size: 15px; margin: 0 0 8px; }
+  #result table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #result td { padding: 2px 0; }
+  #result td:last-child { text-align: right; font-weight: 600; }
+
+  #log-wrap { overflow-y: auto; min-height: 0; padding: 12px 18px; }
+  #log-wrap h2 { font-size: 15px; margin: 0 0 8px; }
+  #log { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  #log li { padding: 4px 0; border-bottom: 1px solid #eef1f4; }
+  #log li.abort { color: var(--dead); font-weight: 600; }
+  #log li.wait { color: var(--wait); }
+  #log time { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>LockSight <span>live deadlock detection and recovery</span></h1>
+  <label>Scenario <select id="scenario"></select></label>
+  <label>Detection <select id="detection"></select></label>
+  <label>Victim policy <select id="policy"></select></label>
+  <label>Playback speed <input id="speed" type="range" min="1" max="10" value="5"></label>
+  <button id="run">Run scenario</button>
+</header>
+
+<main>
+  <section id="stage">
+    <div id="cy"></div>
+    <div id="empty">Choose a scenario and press <strong>&nbsp;Run scenario&nbsp;</strong> to start.</div>
+    <div id="banner"></div>
+    <div id="legend">
+      <div class="key"><span class="swatch" style="border-color: var(--hold)"></span> holds</div>
+      <div class="key"><span class="swatch" style="border-color: var(--wait); border-top-style: dashed"></span> waiting for</div>
+      <div class="key"><span class="dot" style="background: var(--dead)"></span> deadlocked</div>
+    </div>
+  </section>
+
+  <aside>
+    <div id="counters">
+      <div class="counter" id="c-active"><b>0</b><span>running</span></div>
+      <div class="counter" id="c-waiting"><b>0</b><span>waiting</span></div>
+      <div class="counter" id="c-aborts"><b>0</b><span>deadlocks broken</span></div>
+      <div class="counter" id="c-done"><b>0</b><span>finished</span></div>
+    </div>
+    <div id="result"><h2>Run summary</h2><table id="result-table"></table></div>
+    <div id="log-wrap"><h2>Event log</h2><ol id="log"></ol></div>
+  </aside>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = { hold: "#0f766e", wait: "#d97706", dead: "#dc2626",
+                 resource: "#1e3a5f", process: "#475569" };
+
+// ---------- graph ----------
+
+const cy = cytoscape({
+  container: $("cy"),
+  layout: { name: "preset" },
+  wheelSensitivity: 0.3,
+  style: [
+    { selector: "node.resource", style: {
+        "shape": "round-rectangle", "width": 86, "height": 36,
+        "background-color": COLORS.resource, "label": "data(label)",
+        "color": "#fff", "font-size": 13, "font-weight": 600,
+        "text-valign": "center", "text-halign": "center" } },
+    { selector: "node.process", style: {
+        "shape": "ellipse", "width": 30, "height": 30,
+        "background-color": COLORS.process, "label": "data(label)",
+        "font-size": 12, "color": "#1c2733", "text-valign": "bottom",
+        "text-margin-y": 6, "text-background-color": "#eef2f5",
+        "text-background-opacity": 0.85, "text-background-padding": 2 } },
+    { selector: "node.process.holding", style: { "background-color": COLORS.hold } },
+    { selector: "node.process.waiting", style: { "background-color": COLORS.wait } },
+    { selector: "node.hidden", style: { "opacity": 0, "events": "no" } },
+    { selector: "node.deadlock", style: {
+        "background-color": COLORS.dead, "width": 38, "height": 38 } },
+    { selector: "node.victim", style: {
+        "border-width": 6, "border-color": "#7f1d1d", "width": 46, "height": 46,
+        "font-weight": 700, "color": COLORS.dead } },
+    { selector: "edge", style: {
+        "curve-style": "bezier", "width": 3, "target-arrow-shape": "triangle",
+        "arrow-scale": 1.2, "label": "data(label)", "font-size": 11 } },
+    { selector: "edge.alloc", style: {
+        "line-color": COLORS.hold, "target-arrow-color": COLORS.hold } },
+    { selector: "edge.request", style: {
+        "line-color": COLORS.wait, "target-arrow-color": COLORS.wait,
+        "line-style": "dashed", "line-dash-pattern": [8, 5] } },
+    { selector: "edge.deadlock", style: {
+        "line-color": COLORS.dead, "target-arrow-color": COLORS.dead, "width": 5 } },
+  ],
+});
+
+let currentGraph = null;
+
+function setupRun(msg) {
+  cy.elements().remove();
+  $("empty").style.display = "none";
+  const rids = Object.keys(msg.resources);
+  const pids = msg.pids;
+  // Fixed positions so nodes never jump around:
+  // resources on an inner ring, processes on an outer ring.
+  const rIn = 90 + rids.length * 14;
+  const rOut = rIn + 130 + pids.length * 3;
+  rids.forEach((rid, i) => {
+    const a = (2 * Math.PI * i) / rids.length - Math.PI / 2;
+    const n = msg.resources[rid];
+    cy.add({ group: "nodes", classes: "resource",
+             data: { id: "r:" + rid, rid, total: n, label: n > 1 ? `${rid} (${n})` : rid },
+             position: { x: rIn * Math.cos(a), y: rIn * Math.sin(a) } });
+  });
+  pids.forEach((pid, i) => {
+    const a = (2 * Math.PI * i) / pids.length - Math.PI / 2;
+    cy.add({ group: "nodes", classes: "process hidden",
+             data: { id: "p:" + pid, pid, label: pid },
+             position: { x: rOut * Math.cos(a), y: rOut * Math.sin(a) } });
+  });
+  cy.fit(undefined, 100);
+  currentGraph = null;
+}
+
+function renderGraph(g) {
+  currentGraph = g;
+  cy.batch(() => {
+    cy.edges().remove();
+    const active = new Set(g.processes);
+    cy.nodes(".process").forEach((n) => {
+      const pid = n.data("pid");
+      n.toggleClass("hidden", !active.has(pid));
+      n.toggleClass("waiting", !!g.request[pid]);
+      n.toggleClass("holding", !g.request[pid] && !!g.allocation[pid]);
+    });
+    for (const [pid, alloc] of Object.entries(g.allocation)) {
+      for (const [rid, n] of Object.entries(alloc)) {
+        cy.add({ group: "edges", classes: "alloc",
+                 data: { id: `a|${rid}|${pid}`, source: "r:" + rid, target: "p:" + pid,
+                         label: n > 1 ? String(n) : "" } });
+      }
+    }
+    for (const [pid, req] of Object.entries(g.request)) {
+      for (const [rid, n] of Object.entries(req)) {
+        cy.add({ group: "edges", classes: "request",
+                 data: { id: `q|${pid}|${rid}`, source: "p:" + pid, target: "r:" + rid,
+                         label: n > 1 ? String(n) : "" } });
+      }
+    }
+  });
+  const waiting = Object.keys(g.request).length;
+  $("c-active").querySelector("b").textContent = g.processes.length;
+  $("c-waiting").querySelector("b").textContent = waiting;
+}
+
+function highlightDeadlock(e) {
+  const group = new Set(e.group);
+  cy.batch(() => {
+    group.forEach((pid) => cy.getElementById("p:" + pid).addClass("deadlock"));
+    cy.getElementById("p:" + e.pid).addClass("victim");
+    // Highlight edges that link deadlocked processes through a shared resource.
+    cy.nodes(".resource").forEach((r) => {
+      const edges = r.connectedEdges().filter((ed) => {
+        const other = ed.source().id() === r.id() ? ed.target() : ed.source();
+        return group.has(other.data("pid"));
+      });
+      const touched = new Set(edges.map((ed) =>
+        (ed.source().id() === r.id() ? ed.target() : ed.source()).data("pid")));
+      if (touched.size >= 2) edges.addClass("deadlock");
+    });
+  });
+  const banner = $("banner");
+  banner.innerHTML = `Deadlock among ${e.group.join(", ")}` +
+    `<small>Found by ${e.method === "tarjan" ? "Tarjan's cycle search" : "the matrix algorithm"}. ` +
+    `Aborting ${e.pid} (policy: ${e.policy.replace("_", " ")}).</small>`;
+  banner.style.display = "block";
+}
+
+function clearDeadlock() {
+  cy.elements().removeClass("deadlock victim");
+  $("banner").style.display = "none";
+}
+
+// ---------- log + counters ----------
+
+let startTime = null, aborts = 0, ends = 0;
+
+function logLine(e) {
+  if (startTime === null) startTime = e.time;
+  const t = (e.time - startTime).toFixed(2) + "s";
+  let text = null, cls = "";
+  switch (e.type) {
+    case "acquire": text = `${e.pid} took ${e.resource}`; break;
+    case "wait": text = `${e.pid} is waiting for ${e.resource}`; cls = "wait"; break;
+    case "release": text = `${e.pid} released ${e.resource}`; break;
+    case "abort": text = `Deadlock broken: aborted ${e.pid}`; cls = "abort"; break;
+    case "retry": text = `${e.pid} restarted (attempt ${e.attempt})`; break;
+    case "process_end": text = `${e.pid} ended`; break;
+  }
+  if (!text) return;
+  const li = document.createElement("li");
+  li.className = cls;
+  li.innerHTML = `<time>${t}</time>`;
+  li.appendChild(document.createTextNode(text));
+  const log = $("log");
+  log.prepend(li);
+  while (log.children.length > 300) log.lastChild.remove();
+}
+
+function resetPanels() {
+  startTime = null; aborts = 0; ends = 0;
+  $("log").innerHTML = "";
+  $("result").style.display = "none";
+  for (const id of ["c-active", "c-waiting", "c-aborts", "c-done"])
+    $(id).querySelector("b").textContent = "0";
+}
+
+function showResult(row) {
+  const labels = {
+    completed: "Tasks finished", failed: "Tasks failed", aborts: "Aborts",
+    wall_time_s: "Wall time (s)", throughput_per_s: "Throughput (tasks/s)",
+    wasted_work_s: "Wasted work (s)", detection_runs: "Detection runs",
+    detection_time_ms: "Detection time (ms)",
+  };
+  $("result-table").innerHTML = Object.entries(labels)
+    .map(([k, l]) => `<tr><td>${l}</td><td>${row[k]}</td></tr>`).join("");
+  $("result").style.display = "block";
+  $("c-done").querySelector("b").textContent = row.completed;
+}
+
+// ---------- playback ----------
+// Events arrive faster than a person can follow, so they are queued and
+// replayed with a delay. Deadlocks pause the playback so they can be seen.
+
+const queue = [];
+let playing = false;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const stepDelay = () => 520 - Number($("speed").value) * 50;   // 470ms .. 20ms
+
+async function play() {
+  playing = true;
+  while (queue.length) {
+    const msg = queue.shift();
+    await apply(msg);
+    await sleep(queue.length > 400 ? 0 : stepDelay());
+  }
+  playing = false;
+}
+
+async function apply(msg) {
+  switch (msg.type) {
+    case "run_start":
+      resetPanels();
+      setupRun(msg);
+      break;
+    case "event": {
+      const e = msg.event;
+      logLine(e);
+      if (e.type === "abort") {
+        aborts += 1;
+        $("c-aborts").querySelector("b").textContent = aborts;
+        highlightDeadlock(e);                      // show the cycle as it was
+        await sleep(Math.max(900, stepDelay() * 6));
+        clearDeadlock();
+      }
+      if (e.type === "process_end") {
+        // Every abort also ends a process once, so finished = ends - aborts.
+        ends += 1;
+        $("c-done").querySelector("b").textContent = ends - aborts;
+      }
+      renderGraph(msg.graph);
+      break;
+    }
+    case "run_complete":
+      showResult(msg.result);
+      $("run").disabled = false;
+      break;
+    case "run_error":
+      $("banner").textContent = "Run failed: " + msg.error;
+      $("banner").style.display = "block";
+      $("run").disabled = false;
+      break;
+  }
+}
+
+// ---------- connection + controls ----------
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = (ev) => {
+    queue.push(JSON.parse(ev.data));
+    if (!playing) play();
+  };
+  ws.onclose = () => setTimeout(connect, 1000);   // reconnect if server restarts
+}
+
+async function loadOptions() {
+  const opts = await (await fetch("/api/options")).json();
+  const fill = (id, values, pick) => {
+    $(id).innerHTML = values.map((v) =>
+      `<option value="${v}" ${v === pick ? "selected" : ""}>${v.replace(/_/g, " ")}</option>`).join("");
+  };
+  fill("scenario", opts.scenarios, "bank");
+  fill("detection", opts.detection, "periodic");
+  fill("policy", opts.policies, "weighted");
+}
+
+$("run").addEventListener("click", async () => {
+  $("run").disabled = true;
+  clearDeadlock();
+  const res = await fetch("/api/run", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario: $("scenario").value,
+                           detection: $("detection").value,
+                           policy: $("policy").value }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    $("banner").textContent = err.detail || "Could not start the run";
+    $("banner").style.display = "block";
+    // 409 = a run is already playing; the button re-enables when it ends.
+    if (res.status !== 409) $("run").disabled = false;
+  }
+});
+
+window.addEventListener("resize", () => cy.fit(undefined, 100));
+loadOptions();
+connect();
+</script>
+</body>
+</html>

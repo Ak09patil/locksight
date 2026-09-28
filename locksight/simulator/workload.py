@@ -79,11 +79,13 @@ class WorkloadResult:
 
 def run_workload(scenario, resources, tasks, detection="periodic",
                  interval=0.05, policy="weighted", max_retries=50,
-                 thread_timeout=60):
+                 thread_timeout=60, setup=None):
     """Run tasks concurrently and return a WorkloadResult.
 
     resources: dict resource_id -> number of instances
     tasks:     list of Task
+    setup:     optional fn(sight) called before the run starts, e.g. so the
+               dashboard server can register its own event listener
     """
     sight = LockSight(detection=detection, interval=interval, policy=policy)
     for rid, instances in resources.items():
@@ -101,6 +103,8 @@ def run_workload(scenario, resources, tasks, detection="periodic",
                 wasted[0] += e["time"] - started[e["pid"]]
 
     sight.on_event(on_event)
+    if setup is not None:
+        setup(sight)
 
     completed, failed = [], []
 
