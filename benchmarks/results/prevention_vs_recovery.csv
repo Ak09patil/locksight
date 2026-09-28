@@ -1,0 +1,9 @@
+transfers,approach,wall_time_s,throughput_per_s,aborts,wasted_work_s
+20,detection + recovery,0.134,149.0,4,0.099
+20,prevention (lock ordering),0.112,181.7,0,0.0
+40,detection + recovery,0.288,139.6,8.3,0.432
+40,prevention (lock ordering),0.249,161.8,0,0.0
+80,detection + recovery,0.834,96.9,59,12.42
+80,prevention (lock ordering),0.595,135.3,0,0.0
+160,detection + recovery,2.151,74.6,163,83.864
+160,prevention (lock ordering),1.631,98.2,0,0.0

@@ -1,0 +1,19 @@
+graph,processes,tarjan_ms,matrix_ms,tarjan_deadlocked,matrix_deadlocked
+random,10,0.009,0.025,0,0
+random,50,0.045,0.08,0,0
+random,100,0.095,0.162,0,0
+random,250,0.249,0.405,0,0
+random,500,0.513,0.886,0,0
+random,1000,1.18,1.683,0,0
+random,2000,2.497,3.57,0,0
+random,5000,6.556,10.489,0,0
+random,10000,13.156,21.702,4,11
+worst-case chain,10,0.011,0.026,0,0
+worst-case chain,50,0.056,0.27,0,0
+worst-case chain,100,0.115,0.978,0,0
+worst-case chain,250,0.295,6.251,0,0
+worst-case chain,500,0.603,24.503,0,0
+worst-case chain,1000,1.343,94.03,0,0
+worst-case chain,2000,2.784,409.892,0,0
+worst-case chain,5000,7.057,2776.75,0,0
+worst-case chain,10000,16.276,11271.582,0,0

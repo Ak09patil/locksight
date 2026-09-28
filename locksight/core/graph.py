@@ -29,6 +29,15 @@ class ResourceGraph:
         # request[pid][rid] = instances of rid pid is waiting for
         self.request = defaultdict(lambda: defaultdict(int))
 
+        # Reverse index, kept in sync with allocation:
+        #   held_by[rid][pid] = instances of rid held by pid
+        #   allocated[rid]    = total instances of rid currently held
+        # Without it, holders() and available() had to scan every process,
+        # which made building the wait-for graph O(n^2). Benchmarks exposed
+        # this; with the index both are fast lookups.
+        self.held_by = defaultdict(dict)
+        self.allocated = defaultdict(int)
+
     # ---------- nodes ----------
 
     def add_process(self, pid):
@@ -43,7 +52,9 @@ class ResourceGraph:
         """Remove a process and release everything it holds or waits for.
         Used by recovery when a victim is aborted."""
         self._require_process(pid)
-        self.allocation.pop(pid, None)
+        for rid, n in self.allocation.pop(pid, {}).items():
+            self.held_by[rid].pop(pid, None)
+            self.allocated[rid] -= n
         self.request.pop(pid, None)
         self.processes.discard(pid)
 
@@ -52,12 +63,11 @@ class ResourceGraph:
     def available(self, rid):
         """Free instances of a resource = total - everything allocated."""
         self._require_resource(rid)
-        held = sum(alloc.get(rid, 0) for alloc in self.allocation.values())
-        return self.resources[rid] - held
+        return self.resources[rid] - self.allocated[rid]
 
     def holders(self, rid):
         """Processes currently holding at least one instance of rid."""
-        return {pid for pid, alloc in self.allocation.items() if alloc.get(rid, 0) > 0}
+        return set(self.held_by.get(rid, ()))
 
     def is_waiting(self, pid):
         return any(n > 0 for n in self.request.get(pid, {}).values())
@@ -85,6 +95,8 @@ class ResourceGraph:
         if self.request[pid][rid] == 0:
             del self.request[pid][rid]
         self.allocation[pid][rid] += count
+        self.held_by[rid][pid] = self.allocation[pid][rid]
+        self.allocated[rid] += count
 
     def release(self, pid, rid, count=1):
         """Remove an allocation edge (process releases)."""
@@ -92,8 +104,12 @@ class ResourceGraph:
         if self.allocation[pid].get(rid, 0) < count:
             raise GraphError(f"{pid} does not hold {count} of {rid}")
         self.allocation[pid][rid] -= count
+        self.allocated[rid] -= count
         if self.allocation[pid][rid] == 0:
             del self.allocation[pid][rid]
+            del self.held_by[rid][pid]
+        else:
+            self.held_by[rid][pid] = self.allocation[pid][rid]
 
     # ---------- derived views ----------
 

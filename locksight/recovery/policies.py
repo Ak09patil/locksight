@@ -9,6 +9,10 @@ pick? The textbook (Silberschatz, Ch. 8) lists the factors:
   - How many resources it holds (aborting it frees more)
   - How many times it has already been a victim (starvation)
 
+"weighted" (the default) combines all four. Its first version,
+"weighted_raw", mixed factors with different units; benchmarks showed
+priority dominated, so "weighted" now normalises each factor first.
+
 Each policy below gives every candidate a COST. The process with the
 LOWEST cost is chosen as the victim ("cheapest to abort").
 
@@ -50,21 +54,48 @@ def most_resources(graph, pid, meta):
     return -resources_held(graph, pid)
 
 
-def weighted(graph, pid, meta, w_priority=1.0, w_work=1.0, w_resources=1.0,
-             w_victim=2.0):
-    """Combined cost used as the default. Considers every factor at once.
-    victim_count RAISES the cost, so repeat victims are avoided naturally."""
+def weighted_raw(graph, pid, meta, w_priority=1.0, w_work=1.0,
+                 w_resources=1.0, w_victim=2.0):
+    """First version of the combined policy, kept for comparison.
+
+    PROBLEM (found in benchmarks): the factors are on different scales.
+    Priority is 0-9 but work_done is usually a fraction of a second, so
+    priority drowns out everything else and this behaves almost exactly
+    like lowest_priority."""
     return (w_priority * meta.priority
             + w_work * meta.work_done
             - w_resources * resources_held(graph, pid)
             + w_victim * meta.victim_count)
 
 
+def weighted_costs(graph, candidates, meta_of, w_priority=1.0, w_work=1.0,
+                   w_resources=1.0, w_victim=1.0):
+    """Improved combined policy: min-max normalise each factor to 0..1
+    WITHIN the deadlocked group, then combine.
+
+    After normalisation every factor has the same influence, whatever its
+    units, so the weights mean what they say. Returns {pid: cost}."""
+    def normalise(values):
+        lo, hi = min(values.values()), max(values.values())
+        if hi == lo:
+            return {p: 0.0 for p in values}
+        return {p: (v - lo) / (hi - lo) for p, v in values.items()}
+
+    prio = normalise({p: meta_of(p).priority for p in candidates})
+    work = normalise({p: meta_of(p).work_done for p in candidates})
+    held = normalise({p: resources_held(graph, p) for p in candidates})
+    past = normalise({p: meta_of(p).victim_count for p in candidates})
+    return {p: (w_priority * prio[p] + w_work * work[p]
+                - w_resources * held[p] + w_victim * past[p])
+            for p in candidates}
+
+
 POLICIES = {
     "lowest_priority": lowest_priority,
     "least_work": least_work,
     "most_resources": most_resources,
-    "weighted": weighted,
+    "weighted_raw": weighted_raw,
+    "weighted": None,   # group-aware, computed by weighted_costs()
 }
 
 
@@ -77,7 +108,8 @@ def choose_victim(graph, group, meta_of, policy="weighted", max_victim_count=3):
     policy:    name from POLICIES
     Returns:   the chosen process id
     """
-    cost_fn = POLICIES[policy]
+    if policy not in POLICIES:
+        raise ValueError(f"Unknown policy {policy}")
 
     # Starvation protection: skip processes aborted too often,
     # unless every process in the group has hit the limit.
@@ -87,7 +119,12 @@ def choose_victim(graph, group, meta_of, policy="weighted", max_victim_count=3):
 
     # Sort key: cost first, then fewer past aborts, then pid so the choice
     # is deterministic (important for repeatable tests and benchmarks).
+    if policy == "weighted":
+        costs = weighted_costs(graph, candidates, meta_of)
+        cost = costs.__getitem__
+    else:
+        cost_fn = POLICIES[policy]
+        cost = lambda p: cost_fn(graph, p, meta_of(p))  # noqa: E731
+
     return min(candidates,
-               key=lambda p: (cost_fn(graph, p, meta_of(p)),
-                              meta_of(p).victim_count,
-                              str(p)))
+               key=lambda p: (cost(p), meta_of(p).victim_count, str(p)))

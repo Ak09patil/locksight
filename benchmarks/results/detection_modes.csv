@@ -1,0 +1,13 @@
+scenario,mode,wall_time_s,throughput_per_s,aborts,detection_runs,detection_time_ms,failed
+bank,on-block,0.459,131.3,21,129.3,17.64,0
+bank,periodic 10 ms,0.986,61.6,45,78.7,23.02,0
+bank,periodic 50 ms,3.274,20.5,60.3,60,27.95,0
+bank,periodic 200 ms,10.865,5.8,54,52.7,26.14,0
+philosophers,on-block,0.461,52.8,10.7,52.7,5.55,0
+philosophers,periodic 10 ms,0.557,44.0,13.7,45.7,5.28,0
+philosophers,periodic 50 ms,1.027,25.5,14.3,18.3,4.3,0
+philosophers,periodic 200 ms,3.671,7.9,17,17.3,5.08,0
+stress,on-block,0.123,164.6,9,47.7,3.25,0
+stress,periodic 10 ms,0.203,99.6,11.3,16.3,1.91,0
+stress,periodic 50 ms,0.676,29.9,12.3,12,2.25,0
+stress,periodic 200 ms,2.154,14.4,10.3,10.3,2.65,0
