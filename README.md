@@ -4,6 +4,8 @@
 
 Operating Systems mini project, Unit 4 (Deadlock): *Deadlock Detection and Recovery System*.
 
+**Full project report:** [docs/REPORT.md](docs/REPORT.md): theory, design, implementation, benchmark results and testing.
+
 ## The problem
 
 Modern backends protect shared data with application-level locks: a row in an
@@ -40,10 +42,17 @@ aborting a single, carefully chosen victim, which then retries automatically.
   background thread.
 - **Workload simulator:** bank transfers, dining philosophers, a database
   connection pool, and random stress workloads, all reproducible from a seed.
-- **Live dashboard** that draws the graph in real time and highlights each
-  deadlock cycle and its victim.
+- **Live dashboard** that draws the graph in real time, highlights each
+  deadlock cycle and its victim, tracks the phase of each run, and narrates
+  every step in plain English.
+- **Interactive blueprint walkthrough**: ten numbered sheets explaining the
+  theory, beside a 3D Resource Allocation Graph that redraws itself for each
+  sheet (the order/refund cycle, Tarjan's deadlocked groups, a victim being
+  removed, a fixed lock order, the dining philosophers). Drag to rotate it;
+  each condition, policy and scenario opens a data sheet with a button to run
+  it live.
 - **Benchmark suite** that produces the charts and tables in the report.
-- **64 automated tests**, including real multi-threaded deadlocks.
+- **71 automated tests**, including real multi-threaded deadlocks.
 
 ## Quick start
 
@@ -137,8 +146,9 @@ worker threads ──sight.lock()──► LockSight runtime
 | `locksight/runtime/` | `locksight.py` (instrumented locks for real threads) |
 | `locksight/simulator/` | `workload.py` (runner and metrics), `scenarios.py`, `run.py` (CLI), `order_refund.py` (terminal demo) |
 | `locksight/server/` | `app.py` (FastAPI server streaming events over WebSocket) |
-| `dashboard/` | `index.html` (live graph view), `vendor/` (Cytoscape.js, served locally) |
+| `dashboard/` | `index.html` (page), `app.css` (styles), `sim.js` (simulation, tabs, modals), `story.js` (3D blueprint figure and scroll effects), `vendor/` (libraries, served locally) |
 | `benchmarks/` | `run_benchmarks.py` and generated `results/` |
+| `docs/` | `REPORT.md` (project report) and `images/` |
 | `tests/` | pytest suite |
 
 ## Design decisions
@@ -170,6 +180,9 @@ worker threads ──sight.lock()──► LockSight runtime
 
 - [FastAPI](https://fastapi.tiangolo.com/) and [Uvicorn](https://www.uvicorn.org/): dashboard server
 - [Cytoscape.js](https://js.cytoscape.org/) 3.34.3 (MIT licence): graph drawing, bundled in `dashboard/vendor/`
+- [Three.js](https://threejs.org/) r170 (MIT licence): 3D blueprint figure, bundled in `dashboard/vendor/`
+- [GSAP](https://gsap.com/) 3.12.5 with ScrollTrigger (GSAP standard licence): animations, bundled in `dashboard/vendor/`
+- [Lenis](https://lenis.darkroom.engineering/) 1.1.13 (MIT licence): smooth scrolling, bundled in `dashboard/vendor/`
 - [matplotlib](https://matplotlib.org/): benchmark charts
 - [pytest](https://pytest.org/) and [HTTPX](https://www.python-httpx.org/): tests
 - A. Silberschatz, P. B. Galvin, G. Gagne, *Operating System Concepts*, Wiley, chapter on deadlocks: detection algorithm and recovery strategies
